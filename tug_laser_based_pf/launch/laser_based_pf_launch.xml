@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<launch>
+  <include file="$(find-pkg-share tug_husky)/launch/maze_launch.xml" />
+
+  <node pkg="tug_laser_based_pf" exec="tug_laser_based_pf" output="screen">
+    <param name="use_sim_time" value="true" />
+  </node>
+</launch>
