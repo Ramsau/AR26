@@ -7,12 +7,12 @@
     <include file="$(find-pkg-share ros_gz_sim)/launch/gz_sim.launch.py">
       <arg name="gz_args" value="$(find-pkg-share tug_husky)/world/maze.world -v 4" />
     </include>
-
-    <node pkg="ros_gz_bridge" exec="parameter_bridge" output="screen">
-      <param name="config_file" value="$(find-pkg-share tug_husky)/config/parameter_bridge.yaml" />
-      <param name="use_sim_time" value="true" />
-    </node>
   </group>
+
+  <node pkg="ros_gz_bridge" exec="parameter_bridge" output="screen">
+    <param name="config_file" value="$(find-pkg-share tug_husky)/config/parameter_bridge.yaml" />
+    <param name="use_sim_time" value="true" />
+  </node>
 
   <include file="$(find-pkg-share tug_husky)/launch/spawn_robot_launch.xml" />
 
@@ -25,5 +25,9 @@
     <param name="use_sim_time" value="true" />
   </node>
 
-  <node pkg="nav2_util" exec="lifecycle_bringup" args="map_server" output="screen" />
+  <node pkg="nav2_lifecycle_manager" exec="lifecycle_manager" output="screen">
+    <param name="autostart" value="true" />
+    <param name="node_names" value="['map_server']" />
+    <param name="use_sim_time" value="true" />
+  </node>
 </launch>
