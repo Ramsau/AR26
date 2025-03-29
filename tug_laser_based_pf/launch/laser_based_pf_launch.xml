@@ -3,7 +3,7 @@
 <launch>
   <include file="$(find-pkg-share tug_husky)/launch/maze_launch.xml" />
 
-  <node pkg="tug_laser_based_pf" exec="tug_laser_based_pf" output="screen">
+  <node pkg="tug_laser_based_pf" exec="tug_laser_based_pf" launch-prefix="bash -c 'sleep 5s; $0 $@'" output="screen">
     <param name="use_sim_time" value="true" />
   </node>
 </launch>
