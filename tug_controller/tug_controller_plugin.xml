@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model schematypens="http://www.w3.org/2001/XMLSchema"?>
+
+<library path="tug_controller">
+  <class type="tug_controller::TugController" base_class_type="nav2_core::Controller">
+    <description>
+      TUG controller plugin for nav2
+    </description>
+  </class>
+</library>

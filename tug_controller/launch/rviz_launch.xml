@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model schematypens="http://www.w3.org/2001/XMLSchema"?>
+
+<launch>
+  <node pkg="rviz2" exec="rviz2" args="-d $(find-pkg-share tug_controller)/rviz/config.rviz">
+    <param name="use_sim_time" value="true" />
+
+    <remap from="/tf" to="tf" />
+    <remap from="/tf_static" to="tf_static" />
+  </node>
+</launch>
