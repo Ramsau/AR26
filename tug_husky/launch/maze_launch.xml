@@ -15,19 +15,4 @@
   </node>
 
   <include file="$(find-pkg-share tug_husky)/launch/spawn_robot_launch.xml" />
-
-  <!-- <node pkg="tf2_ros" exec="static_transform_publisher" args="-frame-id map -child-frame-id odom" output="screen">
-    <param name="use_sim_time" value="true" />
-  </node>
-
-  <node pkg="nav2_map_server" exec="map_server" output="screen">
-    <param name="yaml_filename" value="$(find-pkg-share tug_husky)/map/maze.yaml" />
-    <param name="use_sim_time" value="true" />
-  </node>
-
-  <node pkg="nav2_lifecycle_manager" exec="lifecycle_manager" output="screen">
-    <param name="autostart" value="true" />
-    <param name="node_names" value="['map_server']" />
-    <param name="use_sim_time" value="true" />
-  </node> -->
 </launch>
