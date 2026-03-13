@@ -41,8 +41,9 @@ ament_export_dependencies(Eigen3)
 # Install binaries
 install(TARGETS tug_laser_based_pf DESTINATION "lib/${CMAKE_PROJECT_NAME}")
 
-# Install launch directory
+# Install directories
 install(DIRECTORY "launch/" DESTINATION "share/${CMAKE_PROJECT_NAME}/launch/")
+install(DIRECTORY "rviz/" DESTINATION "share/${CMAKE_PROJECT_NAME}/rviz/")
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

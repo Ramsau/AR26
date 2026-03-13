@@ -19,4 +19,8 @@
   <node pkg="tug_laser_based_pf" exec="tug_laser_based_pf" launch-prefix="bash -c 'sleep 5s; $0 $@'" exec_name="tug_laser_based_pf" output="screen">
     <param name="use_sim_time" value="true" />
   </node>
+
+  <node pkg="rviz2" exec="rviz2" args="-d $(find-pkg-share tug_laser_based_pf)/rviz/laser_based_pf.rviz -t 'LaserBasedPF'" output="screen">
+    <param name="use_sim_time" value="true" />
+  </node>
 </launch>
