@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <tf2/utils.hpp>
 
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
@@ -82,9 +83,20 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
   //TODO
   
   // 1.) Initialize the Likelihood Field
+  // TODO what to do here?
+  // nav_msgs::msg::OccupancyGrid likelihood_field = occupancy_grid_;
+  likelihood_field_ = occupancy_grid_;
+  
   // 2.) Initialize the Sample Set
-
-
+  for (int i = 0; i < num_partivles_; i++) {
+    particles_.emplace_back();
+    particles_.back().updatePose(
+      occupancy_grid_.info.origin.position.x + max_x_position_ * randomDouble(),
+      occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
+      2 * M_PI * randomDouble()
+    );
+    particles_.back().updateWeight(1.0);
+  }
 
   //normalize weight of particles
   normalizeParticleWeights();
@@ -123,6 +135,24 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
 
   // global variable last_odometry_ contains the last odometry position estimation (ROS Odometry Messasge)
   // local variable odometry contains the current odometry position estimation (ROS Odometry Messasge)
+  double delta_x = odom.pose.pose.position.x - last_odometry_.pose.pose.position.x;
+  double delta_y = odom.pose.pose.position.y - last_odometry_.pose.pose.position.y;
+  double delta_trans = std::sqrt(std::pow(delta_x, 2) + std::pow(delta_y, 2));
+
+  double theta_travel = std::atan2(delta_y, delta_x);
+  double delta_theta_1 = theta_travel - tf2::getYaw(last_odometry_.pose.pose.orientation);
+  double delta_theta_2 = tf2::getYaw(odom.pose.pose.orientation) - theta_travel;
+
+  double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * delta_trans);
+  double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
+  double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * delta_trans);
+
+  for (auto &particle : particles_) {
+    particle.updatePose(
+      particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise),
+      particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise),
+      particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise);
+  }
 
 
   // Keep This - reports your update
@@ -153,6 +183,13 @@ void LaserBasedPfNode::updateLaser(const LaserScan& scan)
 void LaserBasedPfNode::normalizeParticleWeights()
 {
   // TODO Normalize the particles
+  double sum = 0;
+  for (size_t i = 0; i < particles_.size(); i++) {
+    sum += particles_[i].getWeight();
+  }
+  for (size_t i = 0; i < particles_.size(); i++) {
+    particles_[i].updateWeight(particles_[i].getWeight() / sum);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -361,6 +398,11 @@ double LaserBasedPfNode::sampleNormalDistribution(double variance)
     sum += std::rand() % (2 * border) - border;
 
   return sum * 0.5 / scaling_factor;
+}
+
+// -----------------------------------------------------------------------------
+double LaserBasedPfNode::randomDouble() {
+  return static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX);
 }
 
 // -----------------------------------------------------------------------------

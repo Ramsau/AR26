@@ -126,6 +126,14 @@ class LaserBasedPfNode : public rclcpp::Node
     void resamplingParticles();
     double probNormalDistribution(double a, double variance);
     double sampleNormalDistribution(double variance);
+
+  private:
+    double randomDouble();
+    double alpha_1 = 0.00001;
+    double alpha_2 = 0.00001;
+    double alpha_3 = 0.00001;
+    double alpha_4 = 0.00001;
+    nav_msgs::msg::OccupancyGrid likelihood_field_;
 };
 
 } /* namespace tug_laser_based_pf */
