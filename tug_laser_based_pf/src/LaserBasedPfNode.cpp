@@ -83,8 +83,6 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
   max_y_position_ = static_cast<int>(map.info.height * map.info.resolution);
   max_x_position_ = static_cast<int>(map.info.width * map.info.resolution);
 
-  //TODO
-  
   // 1.) Initialize the Likelihood Field
   // calculate distance to closest object using brushfire alg
   likelihood_field_ = std::vector<double>(map.data.size(),  -1.0);
@@ -156,7 +154,7 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
 // -----------------------------------------------------------------------------
 void LaserBasedPfNode::updateOdometry(const Odometry& odom)
 {
-  //TODO move particles the same way the robot moved
+  // move particles the same way the robot moved
   static bool first_call = true;
 
   if (first_call)
@@ -181,8 +179,7 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
   }
 
 
-  //TODO
-  // 1. Enter your odometry update for each particle 
+  // 1. Enter your odometry update for each particle
 
   // global variable last_odometry_ contains the last odometry position estimation (ROS Odometry Messasge)
   // local variable odometry contains the current odometry position estimation (ROS Odometry Messasge)
@@ -231,11 +228,46 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
 // -----------------------------------------------------------------------------
 void LaserBasedPfNode::updateLaser(const LaserScan& scan)
 {
-	// TODO
   // 1. Compute the pose of the virutal laser for each particle
   // - keep in mind that the laser is not positioned at the particle
   // 2. Derive the propbality of a laser measurement using the likelihood field
 	// 3. Compoute the probability of the particles
+  // double robot_angle = tf2::getYaw(last_odometry_.pose.pose.orientation);
+  // double robot_x = last_odometry_.pose.pose.position.x;
+  // double robot_y = last_odometry_.pose.pose.position.y;
+  for (auto &particle : particles_) {
+    double weight = 0;
+    for (int i = 0; i < scan.ranges.size(); i++) {
+      double range = scan.ranges[i];
+      double range_angle = particle.getTheta() + scan.angle_min + scan.angle_increment * i;
+      double p_max, p_miss, p_hit;
+      if (range == std::numeric_limits<double>::infinity()) {
+        p_max = 1;
+        p_miss = 0;
+        p_hit = 0;
+      } else {
+        p_max = 0;
+        p_miss = 1;
+
+        double hit_x = particle.getX() + range * std::cos(range_angle);
+        double hit_y = particle.getY() + range * std::sin(range_angle);
+        double hit_x_px = static_cast<int>(
+          (hit_x - likelihood_field_map_.info.origin.position.x) / likelihood_field_map_.info.resolution
+        );
+        double hit_y_px = static_cast<int>(
+          (hit_y - likelihood_field_map_.info.origin.position.y) / likelihood_field_map_.info.resolution
+        );
+        if (hit_x_px >= 0 && hit_x_px < likelihood_field_map_.info.width && hit_y_px >= 0 && hit_y_px < likelihood_field_map_.info.height) {
+          p_hit = likelihood_field_map_.data[hit_y_px * likelihood_field_map_.info.width + hit_x_px];
+        } else {
+          p_hit = 0;
+        }
+      }
+      weight += p_hit * alpha_hit + p_miss * alpha_miss + p_max * alpha_max;
+    }
+    RCLCPP_INFO_STREAM(get_logger(), "weight:" << weight);
+    particle.updateWeight(weight);
+  }
    
    
   // normalize your weights
@@ -250,7 +282,7 @@ void LaserBasedPfNode::updateLaser(const LaserScan& scan)
 // -----------------------------------------------------------------------------
 void LaserBasedPfNode::normalizeParticleWeights()
 {
-  // TODO Normalize the particles
+  // Normalize the particles
   double sum = 0;
   for (size_t i = 0; i < particles_.size(); i++) {
     sum += particles_[i].getWeight();
