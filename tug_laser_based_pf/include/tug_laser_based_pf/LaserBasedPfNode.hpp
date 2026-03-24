@@ -129,10 +129,11 @@ class LaserBasedPfNode : public rclcpp::Node
 
   private:
     double randomDouble();
-    double alpha_1 = 0.00001;
-    double alpha_2 = 0.00001;
-    double alpha_3 = 0.00001;
-    double alpha_4 = 0.00001;
+    double normalizeAngle(double angle);
+    double alpha_1 = 0.001;
+    double alpha_2 = 0.001;
+    double alpha_3 = 0.001;
+    double alpha_4 = 0.001;
     nav_msgs::msg::OccupancyGrid likelihood_field_;
 };
 
