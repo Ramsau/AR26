@@ -265,7 +265,7 @@ void LaserBasedPfNode::updateLaser(const LaserScan& scan)
       }
       weight += p_hit * alpha_hit + p_miss * alpha_miss + p_max * alpha_max;
     }
-    RCLCPP_INFO_STREAM(get_logger(), "weight:" << weight);
+    RCLCPP_DEBUG_STREAM(get_logger(), "weight:" << weight);
     particle.updateWeight(weight);
   }
    
@@ -300,15 +300,20 @@ void LaserBasedPfNode::resamplingParticles()
   double threshold = particles_[0].getWeight();
   double i = 1;
   double u = randomDouble() / num_partivles_;
-  for (int i = 0; i < particles_.size(); i++) {
+  for (int j = 0; j < particles_.size(); j++) {
     while (u > threshold) {
       threshold += particles_[i].getWeight();
       i++;
     }
     new_particles.push_back(particles_[i]);
-    u += 1 / num_partivles_;
+    u += 1.0 / num_partivles_;
   }
+  RCLCPP_DEBUG_STREAM(get_logger(), "old sample count:" << particles_.size() << " new sample count:" << new_particles.size());
+  assert(new_particles.size() == particles_.size());
   particles_ = new_particles;
+  for (auto &particle : particles_) {
+    particle.updateWeight(1.0 / num_partivles_);
+  }
 
 }
 
@@ -481,7 +486,7 @@ void LaserBasedPfNode::updateLocalization(
 )
 {
   //visualisation of pose
-  publishPose(x, particles);
+  // publishPose(x, particles);
 
   //visualization of particles
   publishParticles(particles);

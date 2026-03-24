@@ -130,10 +130,10 @@ class LaserBasedPfNode : public rclcpp::Node
   private:
     double randomDouble();
     double normalizeAngle(double angle);
-    double alpha_1 = 0.01;
-    double alpha_2 = 0.01;
-    double alpha_3 = 0.01;
-    double alpha_4 = 0.01;
+    double alpha_1 = 0.1;
+    double alpha_2 = 0.1;
+    double alpha_3 = 0.1;
+    double alpha_4 = 0.1;
     double sigma_hit = 2.0;
     double alpha_hit = 0.1;
     double alpha_miss = 0.01;
