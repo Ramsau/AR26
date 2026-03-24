@@ -296,6 +296,20 @@ void LaserBasedPfNode::normalizeParticleWeights()
 void LaserBasedPfNode::resamplingParticles()
 {
   // TODO Resample the particles
+  std::vector<Particle> new_particles{};
+  double threshold = particles_[0].getWeight();
+  double i = 1;
+  double u = randomDouble() / num_partivles_;
+  for (int i = 0; i < particles_.size(); i++) {
+    while (u > threshold) {
+      threshold += particles_[i].getWeight();
+      i++;
+    }
+    new_particles.push_back(particles_[i]);
+    u += 1 / num_partivles_;
+  }
+  particles_ = new_particles;
+
 }
 
 // -----------------------------------------------------------------------------
