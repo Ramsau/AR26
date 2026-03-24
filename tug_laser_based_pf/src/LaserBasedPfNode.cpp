@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <queue>
 #include <tf2/utils.hpp>
 
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -64,6 +65,8 @@ LaserBasedPfNode::LaserBasedPfNode()
       initParticles(res.get()->map);
     }
   );
+
+  likelihood_field_pub_ = create_publisher<OccupancyGrid>("likelihood_field", 100);
 }
 
 // -----------------------------------------------------------------------------
@@ -83,9 +86,57 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
   //TODO
   
   // 1.) Initialize the Likelihood Field
-  // TODO what to do here?
-  // nav_msgs::msg::OccupancyGrid likelihood_field = occupancy_grid_;
-  likelihood_field_ = occupancy_grid_;
+  // calculate distance to closest object using brushfire alg
+  likelihood_field_ = std::vector<double>(map.data.size(),  -1.0);
+  likelihood_field_map_ = map;
+  // first is the actual point, second is the closest map point
+  std::queue<std::pair<Point, Point>> candidate_points;
+  for (int i = 0; i < likelihood_field_.size(); i++) {
+    if (map.data[i] == 100) {
+      candidate_points.push({
+        {i % (int)map.info.width, i / (int)map.info.width},
+        {i % (int)map.info.width, i / (int)map.info.width}
+      });
+      likelihood_field_[i] = 0;
+      likelihood_field_map_.data[i] = 0;
+    }
+  }
+  while (!candidate_points.empty()) {
+    auto current_point = candidate_points.front();
+    candidate_points.pop();
+    double distance = likelihood_field_[current_point.first.x + current_point.first.y * (int)map.info.width];
+    assert(distance != -1.0);
+    for (int dx = -1; dx <= 1; dx++) {
+      for (int dy = -1; dy <= 1; dy++) {
+        int new_x = current_point.first.x + dx;
+        int new_y = current_point.first.y + dy;
+        if (new_x >= 0 && new_x < (int)map.info.width && new_y >= 0 && new_y < (int)map.info.height) {
+          int new_index = new_y * (int)map.info.width + new_x;
+          double new_dist = std::sqrt(
+            std::pow(current_point.second.x - new_x, 2) +
+            std::pow(current_point.second.y - new_y, 2)
+          );
+          if (likelihood_field_[new_index] == -1.0 || new_dist < likelihood_field_[new_index]) {
+            likelihood_field_[new_index] = new_dist;
+            likelihood_field_map_.data[new_index] = new_dist;
+            candidate_points.push({
+              {new_x, new_y},
+              current_point.second
+            });
+          }
+        }
+      }
+    }
+  }
+  // convert distance to likelihood
+  for (int i = 0; i < likelihood_field_.size(); i++) {
+    likelihood_field_[i] = std::exp(
+                             -std::pow(likelihood_field_[i], 2) / (std::pow(sigma_hit, 2) * 2)
+                           ) / std::sqrt(2 * M_PI * sigma_hit);
+    likelihood_field_map_.data[i] = likelihood_field_[i] * 100 * std::sqrt(2 * M_PI * sigma_hit);
+  }
+  likelihood_field_pub_->publish(likelihood_field_map_);
+
   
   // 2.) Initialize the Sample Set
   for (int i = 0; i < num_partivles_; i++) {

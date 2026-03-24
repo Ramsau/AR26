@@ -134,7 +134,14 @@ class LaserBasedPfNode : public rclcpp::Node
     double alpha_2 = 0.001;
     double alpha_3 = 0.001;
     double alpha_4 = 0.001;
-    nav_msgs::msg::OccupancyGrid likelihood_field_;
+    double sigma_hit = 2.0;
+    std::vector<double> likelihood_field_;
+    nav_msgs::msg::OccupancyGrid likelihood_field_map_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr likelihood_field_pub_;
+    struct Point {
+      int x;
+      int y;
+    };
 };
 
 } /* namespace tug_laser_based_pf */
