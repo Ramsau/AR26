@@ -354,6 +354,14 @@ void LaserBasedPfNode::publishPose(
   double x_mean = 0;
   double y_mean = 0;
   double yaw_mean = 0;
+  for (auto& particle: particles) {
+    x_mean += particle.getX();
+    y_mean += particle.getY();
+    yaw_mean += particle.getTheta();
+  }
+  x_mean /= static_cast<double>(num_partivles_);
+  y_mean /= static_cast<double>(num_partivles_);
+  yaw_mean /= static_cast<double>(num_partivles_);
 
   // TODO Calculate the robot pose from the particles
 
