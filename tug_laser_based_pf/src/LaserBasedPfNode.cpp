@@ -187,32 +187,33 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
   double delta_y = odom.pose.pose.position.y - last_odometry_.pose.pose.position.y;
   double delta_trans = std::sqrt(std::pow(delta_x, 2) + std::pow(delta_y, 2));
 
-  double theta_travel = normalizeAngle(std::atan2(delta_y, delta_x));
   double delta_theta_1;
   double delta_theta_2;
-  if (delta_trans == 0) {
+  double theta_travel = 0;
+  if (delta_trans < travel_epsilon) {
     delta_theta_1 = 0;
-    delta_theta_2 = 0;
+    delta_theta_2 = normalizeAngle(tf2::getYaw(odom.pose.pose.orientation) - tf2::getYaw(last_odometry_.pose.pose.orientation));
   } else {
+    theta_travel = normalizeAngle(std::atan2(delta_y, delta_x));
     delta_theta_1 = normalizeAngle(theta_travel - tf2::getYaw(last_odometry_.pose.pose.orientation));
     delta_theta_2 = normalizeAngle(tf2::getYaw(odom.pose.pose.orientation) - theta_travel);
 
     // driving backwards
-    if (std::abs(theta_travel - tf2::getYaw(odom.pose.pose.orientation)) > M_PI / 2.0) {
+    if (std::abs(delta_theta_1) > M_PI / 2.0 && std::abs(delta_theta_2) > M_PI / 2.0) {
       delta_trans = -delta_trans;
       delta_theta_1 = normalizeAngle(delta_theta_1 + M_PI);
       delta_theta_2 = normalizeAngle(delta_theta_2 + M_PI);
     }
   }
 
-  double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * delta_trans);
-  double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
-  double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * delta_trans);
-
-  RCLCPP_DEBUG_STREAM(get_logger(), "dx:" << delta_x << " dy:" << delta_y << " thtravel:" << theta_travel << " orientation:" << tf2::getYaw(odom.pose.pose.orientation) << " dtheta1:" << delta_theta_1 << " dtheta2:" << delta_theta_2);
+  RCLCPP_DEBUG_STREAM(get_logger(), "dx:" << delta_x << " dy:" << delta_y << " thtravel:" << theta_travel << " orientation:" << tf2::getYaw(odom.pose.pose.orientation) << " lastOr:" << tf2::getYaw(last_odometry_.pose.pose.orientation) << " dtheta1:" << delta_theta_1 << " dtheta2:" << delta_theta_2);
 
 
   for (auto &particle : particles_) {
+    double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * delta_trans);
+    double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
+    double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * delta_trans);
+
     particle.updatePose(
       particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise),
       particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise),
