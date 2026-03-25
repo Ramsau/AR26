@@ -45,7 +45,7 @@ LaserBasedPfNode::LaserBasedPfNode()
 
   // Misc
   x_ = Eigen::MatrixXd::Zero(3, 1);
-  num_partivles_ = 100;
+  num_partivles_ = 1000;
   
   // Get static map
   RCLCPP_INFO(get_logger(), "Waiting for map service");
