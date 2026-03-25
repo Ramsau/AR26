@@ -45,7 +45,7 @@ LaserBasedPfNode::LaserBasedPfNode()
 
   // Misc
   x_ = Eigen::MatrixXd::Zero(3, 1);
-  num_partivles_ = 1000;
+  num_partivles_ = 100;
   
   // Get static map
   RCLCPP_INFO(get_logger(), "Waiting for map service");
@@ -113,7 +113,7 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
           double new_dist = std::sqrt(
             std::pow(current_point.second.x - new_x, 2) +
             std::pow(current_point.second.y - new_y, 2)
-          );
+          ) * map.info.resolution;
           if (likelihood_field_[new_index] == -1.0 || new_dist < likelihood_field_[new_index]) {
             likelihood_field_[new_index] = new_dist;
             likelihood_field_map_.data[new_index] = new_dist;
@@ -139,11 +139,20 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
   // 2.) Initialize the Sample Set
   for (int i = 0; i < num_partivles_; i++) {
     particles_.emplace_back();
-    particles_.back().updatePose(
-      occupancy_grid_.info.origin.position.x + max_x_position_ * randomDouble(),
-      occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
-      2 * M_PI * randomDouble()
-    );
+    if (i < 1) {
+      // TODO remove this
+      particles_.back().updatePose(
+        occupancy_grid_.info.origin.position.x + max_x_position_ * 0.501,
+        occupancy_grid_.info.origin.position.y + max_y_position_ * 0.499,
+        0.0
+      );
+    } else {
+      particles_.back().updatePose(
+        occupancy_grid_.info.origin.position.x + max_x_position_ * randomDouble(),
+        occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
+        2 * M_PI * randomDouble()
+      );
+    }
     if (std::isnan(particles_.back().getX() + particles_.back().getY() + particles_.back().getTheta())) {
       RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particles_.back().getX() << " y:" << particles_.back().getY() << " theta:" << particles_.back().getTheta());
       while (true);
@@ -221,17 +230,18 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
 
 
   for (auto &particle : particles_) {
-    double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * delta_trans);
+    double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * std::abs(delta_trans));
     double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
-    double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * delta_trans);
+    double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * std::abs(delta_trans));
     if (std::isnan(particle.getX() + particle.getY() + particle.getTheta())) {
       RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particle.getX() << " y:" << particle.getY() << " theta:" << particle.getTheta());
+      // TODO remove these
       while (true);
     }
     particle.updatePose(
-      particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise),
-      particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise),
-      particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise);
+      particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise) + sampleNormalDistribution(noise_x * 1000.0) / 1000.0, // these factors are because the stddev implementation cant sample variances below 0.001
+      particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise) + sampleNormalDistribution(noise_y * 1000.0) / 1000.0,
+      particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise + sampleNormalDistribution(noise_theta * 1000.0) / 1000.0);
     if (std::isnan(particle.getX() + particle.getY() + particle.getTheta())) {
       RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particle.getX() << " y:" << particle.getY() << " theta:" << particle.getTheta());
       while (true);
@@ -353,15 +363,20 @@ void LaserBasedPfNode::publishPose(
   //calculate mean of given particles
   double x_mean = 0;
   double y_mean = 0;
+  double x2_mean = 0;
+  double y2_mean = 0;
   double yaw_mean = 0;
   for (auto& particle: particles) {
     x_mean += particle.getX();
     y_mean += particle.getY();
-    yaw_mean += particle.getTheta();
+    x2_mean += std::cos(particle.getTheta());
+    y2_mean += std::sin(particle.getTheta());
   }
   x_mean /= static_cast<double>(num_partivles_);
   y_mean /= static_cast<double>(num_partivles_);
-  yaw_mean /= static_cast<double>(num_partivles_);
+  x2_mean /= static_cast<double>(num_partivles_);
+  y2_mean /= static_cast<double>(num_partivles_);
+  yaw_mean = atan2(y2_mean, x2_mean);
 
   // TODO Calculate the robot pose from the particles
 
