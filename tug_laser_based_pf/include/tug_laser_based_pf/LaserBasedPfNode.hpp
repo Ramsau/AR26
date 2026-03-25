@@ -130,14 +130,15 @@ class LaserBasedPfNode : public rclcpp::Node
   private:
     double randomDouble();
     double normalizeAngle(double angle);
-    double alpha_1 = 0.05;
-    double alpha_2 = 0.05;
-    double alpha_3 = 0.05;
+    bool particles_initialized_ = false;
+    double alpha_1 = 0.02;
+    double alpha_2 = 0.5;
+    double alpha_3 = 0.5;
     double alpha_4 = 0.01;
-    double sigma_hit = 2.0;
-    double alpha_hit = 0.1;
-    double alpha_miss = 0.01;
-    double alpha_max = 0.01;
+    double sigma_hit = 10.0;
+    double alpha_hit = 0.01;
+    double alpha_miss = 0.05;
+    double alpha_max = 0.05;
     double travel_epsilon = 1E-12;
     std::vector<double> likelihood_field_;
     nav_msgs::msg::OccupancyGrid likelihood_field_map_;

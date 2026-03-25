@@ -144,11 +144,17 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
       occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
       2 * M_PI * randomDouble()
     );
+    if (std::isnan(particles_.back().getX() + particles_.back().getY() + particles_.back().getTheta())) {
+      RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particles_.back().getX() << " y:" << particles_.back().getY() << " theta:" << particles_.back().getTheta());
+      while (true);
+    }
     particles_.back().updateWeight(1.0);
   }
 
   //normalize weight of particles
   normalizeParticleWeights();
+
+  particles_initialized_ = true;
 }
 
 // -----------------------------------------------------------------------------
@@ -175,6 +181,11 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
     
     updateLocalization(x_, particles_);
     first_call = false;
+    return;
+  }
+
+  if (!particles_initialized_) {
+    RCLCPP_ERROR_STREAM(get_logger(), "particles not initialized");
     return;
   }
 
@@ -213,11 +224,18 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
     double delta_theta_1_noise = delta_theta_1 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_1) + alpha_2 * delta_trans);
     double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
     double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * delta_trans);
-
+    if (std::isnan(particle.getX() + particle.getY() + particle.getTheta())) {
+      RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particle.getX() << " y:" << particle.getY() << " theta:" << particle.getTheta());
+      while (true);
+    }
     particle.updatePose(
       particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise),
       particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise),
       particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise);
+    if (std::isnan(particle.getX() + particle.getY() + particle.getTheta())) {
+      RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particle.getX() << " y:" << particle.getY() << " theta:" << particle.getTheta());
+      while (true);
+    }
   }
 
 
@@ -233,9 +251,12 @@ void LaserBasedPfNode::updateLaser(const LaserScan& scan)
   // - keep in mind that the laser is not positioned at the particle
   // 2. Derive the propbality of a laser measurement using the likelihood field
 	// 3. Compoute the probability of the particles
-  // double robot_angle = tf2::getYaw(last_odometry_.pose.pose.orientation);
-  // double robot_x = last_odometry_.pose.pose.position.x;
-  // double robot_y = last_odometry_.pose.pose.position.y;
+
+  if (!particles_initialized_) {
+    RCLCPP_ERROR_STREAM(get_logger(), "particles not initialized");
+    return;
+  }
+
   for (auto &particle : particles_) {
     double weight = 0;
     for (int i = 0; i < scan.ranges.size(); i++) {
@@ -286,34 +307,39 @@ void LaserBasedPfNode::normalizeParticleWeights()
   // Normalize the particles
   double sum = 0;
   for (size_t i = 0; i < particles_.size(); i++) {
-    sum += particles_[i].getWeight();
+    sum += particles_.at(i).getWeight();
   }
   for (size_t i = 0; i < particles_.size(); i++) {
-    particles_[i].updateWeight(particles_[i].getWeight() / sum);
+    particles_.at(i).updateWeight(particles_.at(i).getWeight() / sum);
   }
 }
 
 // -----------------------------------------------------------------------------
 void LaserBasedPfNode::resamplingParticles()
 {
-  // TODO Resample the particles
+  // Resample the particles
   std::vector<Particle> new_particles{};
-  double threshold = particles_[0].getWeight();
-  double i = 1;
+  double threshold = particles_.at(0).getWeight();
+  double i = 0;
   double u = randomDouble() / num_partivles_;
   for (int j = 0; j < particles_.size(); j++) {
     while (u > threshold) {
-      threshold += particles_[i].getWeight();
       i++;
+      threshold += particles_.at(i).getWeight();
     }
-    new_particles.push_back(particles_[i]);
+
+    new_particles.push_back(particles_.at(i));
     u += 1.0 / num_partivles_;
   }
   RCLCPP_DEBUG_STREAM(get_logger(), "old sample count:" << particles_.size() << " new sample count:" << new_particles.size());
-  assert(new_particles.size() == particles_.size());
+  assert(new_particles.size() == num_partivles_);
   particles_ = new_particles;
   for (auto &particle : particles_) {
     particle.updateWeight(1.0 / num_partivles_);
+    if (std::isnan(particle.getX() + particle.getY() + particle.getTheta())) {
+      RCLCPP_ERROR_STREAM(get_logger(), "particle x:" << particle.getX() << " y:" << particle.getY() << " theta:" << particle.getTheta());
+      while (true);
+    }
   }
 
 }
@@ -474,8 +500,9 @@ std::vector<LaserBasedPfNode::Pose> LaserBasedPfNode::getParticlePositions(
 {
   std::vector<Pose> positions;
 
-  for(size_t i = 0; i < particles.size(); i++)
+  for(size_t i = 0; i < particles.size(); i++) {
     positions.push_back(particles[i].getPose());
+  }
 
   return positions;
 }
@@ -487,7 +514,7 @@ void LaserBasedPfNode::updateLocalization(
 )
 {
   //visualisation of pose
-  // publishPose(x, particles);
+  publishPose(x, particles);
 
   //visualization of particles
   publishParticles(particles);
@@ -557,8 +584,12 @@ void LaserBasedPfNode::resetLocalization(double x, double y, double theta)
     double new_theta  = theta + (std::rand() % theta_range
       - static_cast<int>(theta_range / 2.0)) / scale_factor;
 
-    particles_[i].updatePose(new_x, new_y, new_theta);
-    particles_[i].updateWeight(1.0);
+    particles_.at(i).updatePose(new_x, new_y, new_theta);
+    if (std::isnan(particles_.at(i).getX() + particles_.at(i).getY() + particles_.at(i).getTheta())) {
+      RCLCPP_ERROR(get_logger(), "NaN in particle");
+      while (true);
+    }
+    particles_.at(i).updateWeight(1.0);
   }
 }
 
