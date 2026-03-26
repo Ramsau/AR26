@@ -135,11 +135,11 @@ class LaserBasedPfNode : public rclcpp::Node
     double alpha_2 = 0.25;
     double alpha_3 = 0.25;
     double alpha_4 = 0.5;
-    double noise_theta = 0.01;
-    double noise_x = 0.01;
-    double noise_y = 0.01;
-    double sigma_hit = 1.0;
-    double alpha_hit = 0.5;
+    double noise_theta = 0.5;
+    double noise_x = 0.05;
+    double noise_y = 0.05;
+    double sigma_hit = 0.2;
+    double alpha_hit = 0.1;
     double alpha_miss = 0.01;
     double alpha_max = 0.05;
     double travel_epsilon = 1E-12;
