@@ -45,7 +45,7 @@ LaserBasedPfNode::LaserBasedPfNode()
 
   // Misc
   x_ = Eigen::MatrixXd::Zero(3, 1);
-  num_partivles_ = 100;
+  num_partivles_ = 1000;
   
   // Get static map
   RCLCPP_INFO(get_logger(), "Waiting for map service");
@@ -139,20 +139,11 @@ void LaserBasedPfNode::initParticles(const OccupancyGrid& map)
   // 2.) Initialize the Sample Set
   for (int i = 0; i < num_partivles_; i++) {
     particles_.emplace_back();
-    if (i < 1) {
-      // TODO remove this
-      particles_.back().updatePose(
-        occupancy_grid_.info.origin.position.x + max_x_position_ * 0.501,
-        occupancy_grid_.info.origin.position.y + max_y_position_ * 0.499,
-        0.0
-      );
-    } else {
-      particles_.back().updatePose(
-        occupancy_grid_.info.origin.position.x + max_x_position_ * randomDouble(),
-        occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
-        2 * M_PI * randomDouble()
-      );
-    }
+    particles_.back().updatePose(
+      occupancy_grid_.info.origin.position.x + max_x_position_ * randomDouble(),
+      occupancy_grid_.info.origin.position.y + max_y_position_ * randomDouble(),
+      2 * M_PI * randomDouble()
+    );
     particles_.back().updateWeight(1.0);
   }
 
@@ -230,9 +221,9 @@ void LaserBasedPfNode::updateOdometry(const Odometry& odom)
     double delta_trans_noise = delta_trans + sampleNormalDistribution(alpha_3 * std::abs(delta_trans) + alpha_4 * (std::abs(delta_theta_1) + std::abs(delta_theta_2)));
     double delta_theta_2_noise = delta_theta_2 + sampleNormalDistribution(alpha_1 * std::abs(delta_theta_2) + alpha_2 * std::abs(delta_trans));
     particle.updatePose(
-      particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise) + sampleNormalDistribution(noise_x * 100.0) / 100.0, // these factors are because the stddev implementation cant sample variances below 0.001
-      particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise) + sampleNormalDistribution(noise_y * 100.0) / 100.0,
-      particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise + sampleNormalDistribution(noise_theta * 100.0) / 100.0);
+      particle.getX() + delta_trans_noise * std::cos(particle.getTheta() + delta_theta_1_noise),
+      particle.getY() + delta_trans_noise * std::sin(particle.getTheta() + delta_theta_1_noise),
+      particle.getTheta() + delta_theta_1_noise + delta_theta_2_noise);
   }
 
 
@@ -361,18 +352,32 @@ void LaserBasedPfNode::publishPose(
   y2_mean /= static_cast<double>(num_partivles_);
   yaw_mean = atan2(y2_mean, x2_mean);
 
-  // TODO Calculate the robot pose from the particles
+  // Calculate the robot pose from the particles
 
   x(0,0) = x_mean;
   x(1,0) = y_mean;
   x(2,0) = yaw_mean;
 
+  tf2::Transform lidar_to_base = tf2::Transform();
+  try {
+    geometry_msgs::msg::TransformStamped lidar_to_base_msg = tf_buffer_->lookupTransform("lidar_link", "base_link", tf2::TimePointZero);
+    tf2::fromMsg(lidar_to_base_msg.transform, lidar_to_base);
+  }
+  catch (tf2::TransformException &ex)
+  {
+    RCLCPP_ERROR_STREAM(get_logger(), "tf exception: " << ex.what());
+  }
+
   tf2::Quaternion q;
   q.setRPY(0.0, 0.0, yaw_mean);
 
+  // calculate transform and apply offset of lidar.
+  // this is 2d localisation, assume z = 0, so particles should be assumed at lidar height
   tf2::Transform transform;
-  transform.setOrigin( { x_mean, y_mean, 0.0 } );
+  transform.setOrigin( { x_mean, y_mean, -lidar_to_base.getOrigin().z() } );
   transform.setRotation(q);
+  transform = transform * lidar_to_base;
+
 
   TransformStamped stamped_tf;
   stamped_tf.header.stamp = get_clock()->now();
@@ -387,7 +392,7 @@ void LaserBasedPfNode::publishPose(
   double standard_deviation_y = 0;
   double standard_deviation_theta = 0;
 
-  //todo check if uncertainty possible
+  // check if uncertainty possible
   for (size_t i = 0; i < particles.size(); i++)
   {
     standard_deviation_x += std::pow(particles[i].getX() - x_mean, 2);

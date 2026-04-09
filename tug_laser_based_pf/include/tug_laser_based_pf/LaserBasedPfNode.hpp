@@ -131,15 +131,17 @@ class LaserBasedPfNode : public rclcpp::Node
     double randomDouble();
     double normalizeAngle(double angle);
     bool particles_initialized_ = false;
+    // rot1 influencing rot1, rot2
     double alpha_1 = 0.01;
-    double alpha_2 = 0.25;
-    double alpha_3 = 0.25;
-    double alpha_4 = 0.5;
-    double noise_theta = 0.5;
-    double noise_x = 0.05;
-    double noise_y = 0.05;
-    double sigma_hit = 0.2;
-    double alpha_hit = 0.1;
+    // dtrans influencing rot1, rot2
+    double alpha_2 = 0.1;
+    // dtrans influencing dtrans
+    double alpha_3 = 0.1;
+    // rot1 and rot2 influencing dtrans
+    double alpha_4 = 0.01;
+
+    double sigma_hit = 0.1;
+    double alpha_hit = 0.94;
     double alpha_miss = 0.01;
     double alpha_max = 0.05;
     double travel_epsilon = 1E-12;
