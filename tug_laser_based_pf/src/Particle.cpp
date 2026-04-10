@@ -46,10 +46,6 @@ void Particle::updatePose(double x, double y, double theta)
   q.setRPY(0.0, 0.0, theta);
 
   pose_.orientation = tf2::toMsg(q);
-  if (std::isnan(x + y + theta)) {
-    std::cout << "NaN in particle" << std::endl;
-    while (true);
-  }
 }
 
 } /* namespace tug_laser_based_pf */
