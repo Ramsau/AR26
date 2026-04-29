@@ -198,6 +198,11 @@ class G2OBasedMapping : public rclcpp::Node
     // settings
     double odom_vertex_dist_ = 1.0;
     double laser_vertex_dist_ = 0.5;
+
+    // helper functions
+    void iterativeClosestPoint(const LaserScan::ConstSharedPtr& scan_a, const LaserScan::ConstSharedPtr& scan_b,
+      double& delta_x, double& delta_y, double& delta_theta);
+    void laserScanToPoint(double robot_x, double robot_y, double robot_theta, double laser_range, double laser_angle, double& laser_x, double& laser_y);
 };
 
 } /* namespace tug_g2o_based_mapping */

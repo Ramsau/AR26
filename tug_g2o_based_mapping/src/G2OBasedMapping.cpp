@@ -16,194 +16,192 @@
 
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
-namespace tug_g2o_based_mapping
-{
+namespace tug_g2o_based_mapping {
+  // -----------------------------------------------------------------------------
+  G2OBasedMapping::G2OBasedMapping()
+    : Node("tug_g2o_based_mapping")
+  {
+    // TF2
+    transform_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    transform_listener_ = std::make_shared<tf2_ros::TransformListener>(
+      *transform_buffer_
+    );
 
-// -----------------------------------------------------------------------------
-G2OBasedMapping::G2OBasedMapping()
-  : Node("tug_g2o_based_mapping")
-{
-  // TF2
-  transform_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-  transform_listener_ = std::make_shared<tf2_ros::TransformListener>(
-    *transform_buffer_
-  );
+    transform_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(
+      *this
+    );
 
-  transform_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(
-    *this
-  );
+    // Map publish timer
+    map_publish_timer_callback_group_ = create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive
+    );
 
-  // Map publish timer
-  map_publish_timer_callback_group_ = create_callback_group(
-    rclcpp::CallbackGroupType::MutuallyExclusive
-  );
-
-  map_publish_timer_ = rclcpp::create_timer(
-    this,
-    get_clock(),
-    std::chrono::milliseconds(1000), // Update rate may be modified
-    std::bind(&G2OBasedMapping::publishMap, this),
-    map_publish_timer_callback_group_
-  );
-
-  // Publisher
-  map_publisher_ = create_publisher<OccupancyGrid>("map", 10);
-  graph_cloud_publisher_ = create_publisher<PointCloud>("graph_cloud", 10);
-  robot_pose_marker_publisher_ = create_publisher<MarkerArray>(
-    "robot_pose_marker",
-    10
-  );
-
-  fiducials_observed_marker_publisher_ = create_publisher<MarkerArray>(
-    "fiducials_observed_marker",
-    10
-  );
-
-  graph_edges_publisher_ = create_publisher<Marker>("graph_edges", 10);
-  old_fiducials_observed_marker_publisher_ = create_publisher<MarkerArray>(
-    "old_fiducials_observed_marker",
-    10
-  );
-
-  // Subscriber
-  odometry_subscriber_ = create_subscription<Odometry>(
-    "odometry",
-    100,
-    std::bind(&G2OBasedMapping::odomCallback, this, std::placeholders::_1)
-  );
-
-  laser_scan_subscriber_ = create_subscription<LaserScan>(
-    "scan",
-    100,
-    std::bind(&G2OBasedMapping::laserCallback, this, std::placeholders::_1)
-  );
-
-  initial_pose_subscriber_ = create_subscription<PoseWithCovarianceStamped>(
-    "initialpose",
-    100,
-    std::bind(
-      &G2OBasedMapping::initialPoseCallback,
+    map_publish_timer_ = rclcpp::create_timer(
       this,
-      std::placeholders::_1
-    )
-  );
+      get_clock(),
+      std::chrono::milliseconds(1000), // Update rate may be modified
+      std::bind(&G2OBasedMapping::publishMap, this),
+      map_publish_timer_callback_group_
+    );
 
-  // Messages
-  graph_map_.header.frame_id = "map";
-  graph_map_.info.map_load_time = get_clock()->now();
-  graph_map_.info.origin.position.x = -15.0;
-  graph_map_.info.origin.position.y = -15.0;
-  graph_map_.info.resolution = 0.05F;
-  graph_map_.info.width = 600;
-  graph_map_.info.height = 600;
+    // Publisher
+    map_publisher_ = create_publisher<OccupancyGrid>("map", 10);
+    graph_cloud_publisher_ = create_publisher<PointCloud>("graph_cloud", 10);
+    robot_pose_marker_publisher_ = create_publisher<MarkerArray>(
+      "robot_pose_marker",
+      10
+    );
 
-  // Matrices
-  x_ = Eigen::MatrixXd::Zero(3, 1);
+    fiducials_observed_marker_publisher_ = create_publisher<MarkerArray>(
+      "fiducials_observed_marker",
+      10
+    );
 
-  // Solver
-  using SLAMLinearSolver 
-    = g2o::LinearSolverCSparse<g2o::BlockSolverX::PoseMatrixType>;
-  
-  std::unique_ptr<SLAMLinearSolver> solver
-    = std::make_unique<SLAMLinearSolver>();
+    graph_edges_publisher_ = create_publisher<Marker>("graph_edges", 10);
+    old_fiducials_observed_marker_publisher_ = create_publisher<MarkerArray>(
+      "old_fiducials_observed_marker",
+      10
+    );
 
-  solver->setBlockOrdering(false);
+    // Subscriber
+    odometry_subscriber_ = create_subscription<Odometry>(
+      "odometry",
+      100,
+      std::bind(&G2OBasedMapping::odomCallback, this, std::placeholders::_1)
+    );
 
-  optimization_algorithm_ = new g2o::OptimizationAlgorithmGaussNewton(
-    std::make_unique<g2o::BlockSolverX>(std::move(solver))
-  );
+    laser_scan_subscriber_ = create_subscription<LaserScan>(
+      "scan",
+      100,
+      std::bind(&G2OBasedMapping::laserCallback, this, std::placeholders::_1)
+    );
 
-  graph_.setAlgorithm(optimization_algorithm_);
+    initial_pose_subscriber_ = create_subscription<PoseWithCovarianceStamped>(
+      "initialpose",
+      100,
+      std::bind(
+        &G2OBasedMapping::initialPoseCallback,
+        this,
+        std::placeholders::_1
+      )
+    );
 
-  // Init
-  init(0.0, 0.0, 0.0);
+    // Messages
+    graph_map_.header.frame_id = "map";
+    graph_map_.info.map_load_time = get_clock()->now();
+    graph_map_.info.origin.position.x = -15.0;
+    graph_map_.info.origin.position.y = -15.0;
+    graph_map_.info.resolution = 0.05F;
+    graph_map_.info.width = 600;
+    graph_map_.info.height = 600;
 
-  // TODO
-  // find appropriate parameters
-  double x_noise = 1;
-  double y_noise = 1;
-  double rot_noise = 1;    //rad
-  double landmark_x_noise = 1;
-  double landmark_y_noise = 1;
+    // Matrices
+    x_ = Eigen::MatrixXd::Zero(3, 1);
 
-  odom_noise_.fill(0.0);
-  odom_noise_(0, 0) = 1 / (x_noise * x_noise);
-  odom_noise_(1, 1) = 1 / (y_noise * y_noise);
-  odom_noise_(2, 2) = 1 / (rot_noise * rot_noise);
+    // Solver
+    using SLAMLinearSolver
+      = g2o::LinearSolverCSparse<g2o::BlockSolverX::PoseMatrixType>;
 
-  laser_noise_.fill(0.0);
-  laser_noise_(0, 0) = 1;
-  laser_noise_(1, 1) = 1;
-  laser_noise_(2, 2) = 1;
+    std::unique_ptr<SLAMLinearSolver> solver
+      = std::make_unique<SLAMLinearSolver>();
 
-  landmark_noise_.fill(0.0);
-  landmark_noise_(0, 0) = 1 / (landmark_x_noise * landmark_x_noise);
-  landmark_noise_(1, 1) = 1 / (landmark_y_noise * landmark_y_noise);
-}
+    solver->setBlockOrdering(false);
 
-// -----------------------------------------------------------------------------
-G2OBasedMapping::~G2OBasedMapping()
-{
-  delete optimization_algorithm_;
-  delete laser_params_;
-}
+    optimization_algorithm_ = new g2o::OptimizationAlgorithmGaussNewton(
+      std::make_unique<g2o::BlockSolverX>(std::move(solver))
+    );
 
-// -----------------------------------------------------------------------------
-void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
-{
-  if (reset_)
-  {
-    last_odometry_ = *odom;
+    graph_.setAlgorithm(optimization_algorithm_);
 
-    updateLocalization();
+    // Init
+    init(0.0, 0.0, 0.0);
 
-    double x = odom->pose.pose.position.x;
-    double y = odom->pose.pose.position.y;
-    double yaw = yawFromQuaternion(odom->pose.pose.orientation);
+    // TODO
+    // find appropriate parameters
+    double x_noise = 1;
+    double y_noise = 1;
+    double rot_noise = 1;    //rad
+    double landmark_x_noise = 1;
+    double landmark_y_noise = 1;
 
-    init(x, y, yaw);
+    odom_noise_.fill(0.0);
+    odom_noise_(0, 0) = 1 / (x_noise * x_noise);
+    odom_noise_(1, 1) = 1 / (y_noise * y_noise);
+    odom_noise_(2, 2) = 1 / (rot_noise * rot_noise);
 
-    reset_ = false;
-    valid_ = false;
-    return;
+    laser_noise_.fill(0.0);
+    laser_noise_(0, 0) = 1;
+    laser_noise_(1, 1) = 1;
+    laser_noise_(2, 2) = 1;
+
+    landmark_noise_.fill(0.0);
+    landmark_noise_(0, 0) = 1 / (landmark_x_noise * landmark_x_noise);
+    landmark_noise_(1, 1) = 1 / (landmark_y_noise * landmark_y_noise);
   }
 
-  // 1. Enter your odometry update here
-  // 2. Keep track of the odometry updates to the robot position
+  // -----------------------------------------------------------------------------
+  G2OBasedMapping::~G2OBasedMapping()
+  {
+    delete optimization_algorithm_;
+    delete laser_params_;
+  }
 
-  // global variable last_odometry_ contains the last odometry position estimation (ROS Odometry Messasge)
-  // local variable oodom contains the current odometry position estimation (ROS Odometry Messasge)
+  // -----------------------------------------------------------------------------
+  void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
+  {
+    if (reset_)
+    {
+      last_odometry_ = *odom;
 
-  // global variable x_ holds your position (Eigen vector of size 3 [x,y,theta])
-  double delta_x = odom->pose.pose.position.x - last_odometry_.pose.pose.position.x;
-  double delta_y = odom->pose.pose.position.y - last_odometry_.pose.pose.position.y;
-  double delta_theta = yawFromQuaternion(odom->pose.pose.orientation) - yawFromQuaternion(last_odometry_.pose.pose.orientation);
-  x_(0, 0) += delta_x;
-  x_(1, 0) += delta_y;
-  x_(2, 0) += delta_theta;
+      updateLocalization();
 
-  static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-  static int last_vertex_id = -1;
-  if ((last_vertex_pos - x_).norm() > odom_vertex_dist_) {
-    last_vertex_pos = x_;
-    last_id_++;
-    addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
+      double x = odom->pose.pose.position.x;
+      double y = odom->pose.pose.position.y;
+      double yaw = yawFromQuaternion(odom->pose.pose.orientation);
 
-    if (last_vertex_id != -1) {
-      addOdomEdge(last_vertex_id, last_id_);
+      init(x, y, yaw);
+
+      reset_ = false;
+      valid_ = false;
+      return;
     }
-    last_vertex_id = last_id_;
+
+    // 1. Enter your odometry update here
+    // 2. Keep track of the odometry updates to the robot position
+
+    // global variable last_odometry_ contains the last odometry position estimation (ROS Odometry Messasge)
+    // local variable oodom contains the current odometry position estimation (ROS Odometry Messasge)
+
+    // global variable x_ holds your position (Eigen vector of size 3 [x,y,theta])
+    double delta_x = odom->pose.pose.position.x - last_odometry_.pose.pose.position.x;
+    double delta_y = odom->pose.pose.position.y - last_odometry_.pose.pose.position.y;
+    double delta_theta = yawFromQuaternion(odom->pose.pose.orientation) - yawFromQuaternion(last_odometry_.pose.pose.orientation);
+    x_(0, 0) += delta_x;
+    x_(1, 0) += delta_y;
+    x_(2, 0) += delta_theta;
+
+    static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+    static int last_vertex_id = -1;
+    if ((last_vertex_pos - x_).norm() > odom_vertex_dist_) {
+      last_vertex_pos = x_;
+      last_id_++;
+      addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
+
+      if (last_vertex_id != -1) {
+        addOdomEdge(last_vertex_id, last_id_);
+      }
+      last_vertex_id = last_id_;
+    }
+
+    // Keep This - reports your update
+    last_odometry_ = *odom;
   }
 
-  // Keep This - reports your update
-  last_odometry_ = *odom;
-}
-
-// -----------------------------------------------------------------------------
-void G2OBasedMapping::updateLaser(const LaserScan::ConstSharedPtr& laser)
-{
-  if (!laser_params_ || graph_.vertices().size() == 0)
+  // -----------------------------------------------------------------------------
+  void G2OBasedMapping::updateLaser(const LaserScan::ConstSharedPtr& laser)
   {
+    if (!laser_params_ || graph_.vertices().size() == 0)
+    {
       // first laser update
       laser_params_ = new g2o::LaserParameters(
         laser->ranges.size(),
@@ -214,27 +212,74 @@ void G2OBasedMapping::updateLaser(const LaserScan::ConstSharedPtr& laser)
 
       addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, true);
       return;
+    }
+
+    // TODO
+    // 1. Enter your laser scan update here
+
+    static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+    if ((x_ - last_vertex_pos).norm() > laser_vertex_dist_) {
+      last_vertex_pos = x_;
+      last_id_++;
+      addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, false);
+    }
+    // 2. Build up the pose graph by adding odometry and laser edges
+    // 3. Check for loop closures
+    // 4. Optimize the graph
+
+
+    // Keep This - reports your update
+    updateLocalization();
+    visualizeRobotPoses();
+    // Keep This - if you like to visualize your map (collected laser scans in the graph)
+    visualizeLaserScans();
   }
 
-  // TODO
-  // 1. Enter your laser scan update here
+  // -----------------------------------------------------------------------------
+  void G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_a, const LaserScan::ConstSharedPtr &scan_b,
+    double& delta_x, double& delta_y, double& delta_theta) {
+    typedef struct {
+      double x, y;
+    } Point;
+    std::vector<Point> points_a;
 
-  static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-  if ((x_ - last_vertex_pos).norm() > laser_vertex_dist_) {
-    last_vertex_pos = x_;
-    last_id_++;
-    addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, false);
+    // precompute points of scan a
+    for (int i = 0; i < scan_a->ranges.size(); i++) {
+      double range = scan_a->ranges[i];
+      double angle = scan_a->angle_min + scan_a->angle_increment * i;
+      double x, y;
+      laserScanToPoint(0, 0, 0, range, angle, x, y);
+      points_a.push_back({x, y});
+    }
+
+    // iterate until convergence
+    while (true) {
+      // get closest point in a for each point in b
+      std::map<int, int> closest_points{};
+      for (int scan_b_id = 0; scan_b_id < scan_b->ranges.size(); scan_b_id++) {
+        double range = scan_b->ranges[scan_b_id];
+        double angle = scan_b->angle_min + scan_b->angle_increment * scan_b_id;
+        double x, y;
+        laserScanToPoint(delta_x, delta_y, delta_theta, range, angle, x, y);
+        int closest_point_id = -1;
+        double closest_distance = std::numeric_limits<double>::max();
+        for (int point_a_id = 0; point_a_id < points_a.size(); point_a_id++) {
+          double distance = (x - points_a.at(point_a_id).x) * (x - points_a.at(point_a_id).x) + (y - points_a.at(point_a_id).y) * (y - points_a.at(point_a_id).y);
+          if (distance < closest_distance) {
+            closest_distance = distance;
+          }
+        }
+        closest_points[scan_b_id] = closest_point_id;
+      }
+
+
+    }
   }
-  // 2. Build up the pose graph by adding odometry and laser edges
-  // 3. Check for loop closures
-  // 4. Optimize the graph
 
-
-  // Keep This - reports your update
-  updateLocalization();
-  visualizeRobotPoses();
-  // Keep This - if you like to visualize your map (collected laser scans in the graph)
-  visualizeLaserScans();
+// -----------------------------------------------------------------------------
+void G2OBasedMapping::laserScanToPoint(double robot_x, double robot_y, double robot_theta, double laser_range, double laser_angle, double& laser_x, double& laser_y) {
+  laser_x = robot_x + laser_range * cos(laser_angle + robot_theta);
+  laser_y = robot_y + laser_range * sin(laser_angle + robot_theta);
 }
 
 // -----------------------------------------------------------------------------
