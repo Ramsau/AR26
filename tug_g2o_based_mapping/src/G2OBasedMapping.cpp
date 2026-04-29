@@ -182,6 +182,13 @@ void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
   x_(1, 0) += delta_y;
   x_(2, 0) += delta_theta;
 
+  static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+  if ((last_vertex_pos - x_).norm() > 1.0) {
+    last_vertex_pos = x_;
+    addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
+    last_id_++;
+  }
+
   // Keep This - reports your update
   last_odometry_ = *odom;
 }
