@@ -183,10 +183,16 @@ void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
   x_(2, 0) += delta_theta;
 
   static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-  if ((last_vertex_pos - x_).norm() > 1.0) {
+  static int last_vertex_id = -1;
+  if ((last_vertex_pos - x_).norm() > odom_vertex_dist_) {
     last_vertex_pos = x_;
-    addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
     last_id_++;
+    addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
+
+    if (last_vertex_id != -1) {
+      addOdomEdge(last_vertex_id, last_id_);
+    }
+    last_vertex_id = last_id_;
   }
 
   // Keep This - reports your update
@@ -197,31 +203,38 @@ void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
 void G2OBasedMapping::updateLaser(const LaserScan::ConstSharedPtr& laser)
 {
   if (!laser_params_ || graph_.vertices().size() == 0)
-    {
-        // first laser update
-        laser_params_ = new g2o::LaserParameters(
-          laser->ranges.size(),
-          laser->angle_min,
-          laser->angle_increment,
-          laser->range_max
-        );
+  {
+      // first laser update
+      laser_params_ = new g2o::LaserParameters(
+        laser->ranges.size(),
+        laser->angle_min,
+        laser->angle_increment,
+        laser->range_max
+      );
 
-        addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, true);
-        return;
-    }
+      addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, true);
+      return;
+  }
 
-    // TODO
-    // 1. Enter your laser scan update here
-    // 2. Build up the pose graph by adding odometry and laser edges
-    // 3. Check for loop closures
-    // 4. Optimize the graph
+  // TODO
+  // 1. Enter your laser scan update here
+
+  static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+  if ((x_ - last_vertex_pos).norm() > laser_vertex_dist_) {
+    last_vertex_pos = x_;
+    last_id_++;
+    addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, false);
+  }
+  // 2. Build up the pose graph by adding odometry and laser edges
+  // 3. Check for loop closures
+  // 4. Optimize the graph
 
 
-    // Keep This - reports your update
-    updateLocalization();
-    visualizeRobotPoses();
-    // Keep This - if you like to visualize your map (collected laser scans in the graph)
-    visualizeLaserScans();
+  // Keep This - reports your update
+  updateLocalization();
+  visualizeRobotPoses();
+  // Keep This - if you like to visualize your map (collected laser scans in the graph)
+  visualizeLaserScans();
 }
 
 // -----------------------------------------------------------------------------

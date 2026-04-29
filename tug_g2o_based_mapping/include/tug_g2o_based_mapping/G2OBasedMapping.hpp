@@ -194,6 +194,10 @@ class G2OBasedMapping : public rclcpp::Node
     void initialPoseCallback(
       const PoseWithCovarianceStamped::ConstSharedPtr& msg
     );
+
+    // settings
+    double odom_vertex_dist_ = 1.0;
+    double laser_vertex_dist_ = 0.5;
 };
 
 } /* namespace tug_g2o_based_mapping */
