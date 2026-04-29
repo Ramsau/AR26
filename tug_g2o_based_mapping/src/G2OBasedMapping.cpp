@@ -168,7 +168,6 @@ void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
     return;
   }
 
-  // TODO
   // 1. Enter your odometry update here
   // 2. Keep track of the odometry updates to the robot position
 
@@ -176,6 +175,12 @@ void G2OBasedMapping::updateOdometry(const Odometry::ConstSharedPtr& odom)
   // local variable oodom contains the current odometry position estimation (ROS Odometry Messasge)
 
   // global variable x_ holds your position (Eigen vector of size 3 [x,y,theta])
+  double delta_x = odom->pose.pose.position.x - last_odometry_.pose.pose.position.x;
+  double delta_y = odom->pose.pose.position.y - last_odometry_.pose.pose.position.y;
+  double delta_theta = yawFromQuaternion(odom->pose.pose.orientation) - yawFromQuaternion(last_odometry_.pose.pose.orientation);
+  x_(0, 0) += delta_x;
+  x_(1, 0) += delta_y;
+  x_(2, 0) += delta_theta;
 
   // Keep This - reports your update
   last_odometry_ = *odom;
