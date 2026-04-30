@@ -218,10 +218,20 @@ namespace tug_g2o_based_mapping {
     // 1. Enter your laser scan update here
 
     static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+    static int last_vertex_id = -1;
+    static LaserScan::ConstSharedPtr last_laser = nullptr;
     if ((x_ - last_vertex_pos).norm() > laser_vertex_dist_) {
       last_vertex_pos = x_;
       last_id_++;
       addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, false);
+      if (last_vertex_id != -1) {
+        double delta_x = x_(0) - last_vertex_pos(0);
+        double delta_y = x_(1) - last_vertex_pos(1);
+        double delta_theta = x_(2) - last_vertex_pos(2);
+        iterativeClosestPoint(laser, last_laser, delta_x, delta_y, delta_theta);
+      }
+      last_vertex_id = last_id_;
+      last_laser = laser;
     }
     // 2. Build up the pose graph by adding odometry and laser edges
     // 3. Check for loop closures
@@ -236,44 +246,87 @@ namespace tug_g2o_based_mapping {
   }
 
   // -----------------------------------------------------------------------------
-  void G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_a, const LaserScan::ConstSharedPtr &scan_b,
+  void G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_p, const LaserScan::ConstSharedPtr &scan_q,
     double& delta_x, double& delta_y, double& delta_theta) {
-    typedef struct {
-      double x, y;
-    } Point;
-    std::vector<Point> points_a;
+    typedef Eigen::Vector2<double> Point;
+    std::vector<Point> points_q;
+    std::vector<Point> points_q_centered;
 
-    // precompute points of scan a
-    for (int i = 0; i < scan_a->ranges.size(); i++) {
-      double range = scan_a->ranges[i];
-      double angle = scan_a->angle_min + scan_a->angle_increment * i;
+    // precompute points of scan a, also get centroid
+    Point centroid_q = {0, 0};
+    for (int q_range_id = 0; q_range_id < scan_q->ranges.size(); q_range_id++) {
+      if (std::isnan(scan_q->ranges[q_range_id]) || std::isinf(scan_q->ranges[q_range_id])) {
+        continue;
+      }
+      double range = scan_q->ranges[q_range_id];
+      double angle = scan_q->angle_min + scan_q->angle_increment * q_range_id;
       double x, y;
       laserScanToPoint(0, 0, 0, range, angle, x, y);
-      points_a.push_back({x, y});
+      points_q.push_back({x, y});
+      centroid_q(0) += x;
+      centroid_q(1) += y;
+    }
+    centroid_q(0) /= scan_q->ranges.size();
+    centroid_q(1) /= scan_q->ranges.size();
+
+    for (int q_id = 0; q_id < points_q.size(); q_id++) {
+      points_q_centered.push_back({points_q.at(q_id)(0) - centroid_q(0), points_q.at(q_id)(1) - centroid_q(1)});
     }
 
     // iterate until convergence
     while (true) {
       // get closest point in a for each point in b
       std::map<int, int> closest_points{};
-      for (int scan_b_id = 0; scan_b_id < scan_b->ranges.size(); scan_b_id++) {
-        double range = scan_b->ranges[scan_b_id];
-        double angle = scan_b->angle_min + scan_b->angle_increment * scan_b_id;
+
+      std::vector<Point> points_p;
+      std::vector<Point> points_p_centered;
+      Point centroid_p = {0, 0};
+      int p_id = 0;
+      for (int p_range_id = 0; p_range_id < scan_p->ranges.size(); p_range_id++) {
+        if (std::isnan(scan_p->ranges[p_range_id]) || std::isinf(scan_p->ranges[p_range_id])) {
+          continue;
+        }
+        double range = scan_p->ranges[p_range_id];
+        double angle = scan_p->angle_min + scan_p->angle_increment * p_range_id;
         double x, y;
         laserScanToPoint(delta_x, delta_y, delta_theta, range, angle, x, y);
         int closest_point_id = -1;
         double closest_distance = std::numeric_limits<double>::max();
-        for (int point_a_id = 0; point_a_id < points_a.size(); point_a_id++) {
-          double distance = (x - points_a.at(point_a_id).x) * (x - points_a.at(point_a_id).x) + (y - points_a.at(point_a_id).y) * (y - points_a.at(point_a_id).y);
+        for (int q_id = 0; q_id < points_q.size(); q_id++) {
+          double distance = (x - points_q.at(q_id)(0)) * (x - points_q.at(q_id)(0)) + (y - points_q.at(q_id)(1)) * (y - points_q.at(q_id)(1));
           if (distance < closest_distance) {
             closest_distance = distance;
+            closest_point_id = q_id;
           }
         }
-        closest_points[scan_b_id] = closest_point_id;
+        closest_points[p_id] = closest_point_id;
+        centroid_p(0) += x;
+        centroid_p(1) += y;
+        points_p.push_back({x, y});
+        p_id++;
       }
+      centroid_p(0) /= scan_p->ranges.size();
+      centroid_p(1) /= scan_p->ranges.size();
 
 
+      Eigen::Matrix2<double> W = Eigen::Matrix2<double>::Zero();
+      for (int p_id = 0; p_id < points_p.size(); p_id++) {
+        RCLCPP_INFO_STREAM(get_logger(), "centering: " << p_id);
+        // TODO fix this
+        points_p_centered.push_back({points_p.at(p_id)(0) - centroid_p(0), points_p.at(p_id)(1) - centroid_p(1)});
+        RCLCPP_INFO_STREAM(get_logger(), "centering: " << points_p_centered.at(p_id));
+        W += points_p_centered.at(p_id) * points_q_centered.at(closest_points.at(p_id)).transpose();
+      }
+      Eigen::Matrix2<double> U, V;
+      Eigen::JacobiSVD<Eigen::Matrix2<double>> svd(W, Eigen::ComputeFullU | Eigen::ComputeFullV);
+      U = svd.matrixU();
+      V = svd.matrixV();
+      Eigen::Matrix2<double> R = U * V.transpose();
+      // Eigen::Vector2<double> delta_p = R * (points_p.at(0) - points_q.at(closest_points.at(0)));
+      RCLCPP_INFO_STREAM(get_logger(), "R: " << R);
+      break;
     }
+
   }
 
 // -----------------------------------------------------------------------------
