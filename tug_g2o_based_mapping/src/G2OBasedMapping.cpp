@@ -228,10 +228,17 @@ namespace tug_g2o_based_mapping {
         double delta_x = x_(0) - last_vertex_pos(0);
         double delta_y = x_(1) - last_vertex_pos(1);
         double delta_theta = x_(2) - last_vertex_pos(2);
-        iterativeClosestPoint(laser, last_laser, delta_x, delta_y, delta_theta);
+        if (iterativeClosestPoint(laser, last_laser, delta_x, delta_y, delta_theta)) {
+          last_vertex_id = last_id_;
+          last_laser = laser;
+        } else {
+          RCLCPP_WARN_STREAM(get_logger(), "ICP failed");
+        }
       }
-      last_vertex_id = last_id_;
-      last_laser = laser;
+      else {
+        last_vertex_id = last_id_;
+        last_laser = laser;
+      }
     }
     // 2. Build up the pose graph by adding odometry and laser edges
     // 3. Check for loop closures
@@ -246,7 +253,7 @@ namespace tug_g2o_based_mapping {
   }
 
   // -----------------------------------------------------------------------------
-  void G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_p, const LaserScan::ConstSharedPtr &scan_q,
+  bool G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_p, const LaserScan::ConstSharedPtr &scan_q,
     double& delta_x, double& delta_y, double& delta_theta) {
     typedef Eigen::Vector2<double> Point;
     std::vector<Point> points_q;
@@ -274,10 +281,12 @@ namespace tug_g2o_based_mapping {
     }
 
     // iterate until convergence
+    int iterations = 1;
     while (true) {
-      // get closest point in a for each point in b
       std::map<int, int> closest_points{};
+      double error = 0;
 
+      // get closest point in a for each point in b
       std::vector<Point> points_p;
       std::vector<Point> points_p_centered;
       Point centroid_p = {0, 0};
@@ -300,6 +309,7 @@ namespace tug_g2o_based_mapping {
           }
         }
         closest_points[p_id] = closest_point_id;
+        error += closest_distance * closest_distance;
         centroid_p(0) += x;
         centroid_p(1) += y;
         points_p.push_back({x, y});
@@ -307,14 +317,13 @@ namespace tug_g2o_based_mapping {
       }
       centroid_p(0) /= scan_p->ranges.size();
       centroid_p(1) /= scan_p->ranges.size();
+      error /= scan_p->ranges.size();
 
 
       Eigen::Matrix2<double> W = Eigen::Matrix2<double>::Zero();
       for (int p_id = 0; p_id < points_p.size(); p_id++) {
-        RCLCPP_INFO_STREAM(get_logger(), "centering: " << p_id);
         // TODO fix this
         points_p_centered.push_back({points_p.at(p_id)(0) - centroid_p(0), points_p.at(p_id)(1) - centroid_p(1)});
-        RCLCPP_INFO_STREAM(get_logger(), "centering: " << points_p_centered.at(p_id));
         W += points_p_centered.at(p_id) * points_q_centered.at(closest_points.at(p_id)).transpose();
       }
       Eigen::Matrix2<double> U, V;
@@ -323,10 +332,24 @@ namespace tug_g2o_based_mapping {
       V = svd.matrixV();
       Eigen::Matrix2<double> R = U * V.transpose();
       // Eigen::Vector2<double> delta_p = R * (points_p.at(0) - points_q.at(closest_points.at(0)));
-      RCLCPP_INFO_STREAM(get_logger(), "R: " << R);
-      break;
-    }
+      RCLCPP_DEBUG_STREAM(get_logger(), "R:\n" << R);
+      Eigen::Vector2<double> T = centroid_q - R * centroid_p;
+      RCLCPP_DEBUG_STREAM(get_logger(), "T:\n" << T);
+      RCLCPP_DEBUG_STREAM(get_logger(), "error: " << error);
 
+      if (iterations++ > icp_max_iterations_) {
+        return false;
+      }
+
+      if (error > icp_error_threshold_) {
+        delta_x += T(0);
+        delta_y += T(1);
+        delta_theta -= atan2(R(1, 0), R(0, 0));
+      } else {
+        RCLCPP_DEBUG_STREAM(get_logger(), "final dx:" << delta_x << " dy:" << delta_y << " dtheta:" << delta_theta);
+        return true;
+      }
+    }
   }
 
 // -----------------------------------------------------------------------------
