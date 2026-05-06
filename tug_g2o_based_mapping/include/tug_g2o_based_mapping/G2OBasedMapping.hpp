@@ -196,17 +196,20 @@ class G2OBasedMapping : public rclcpp::Node
     );
 
     // settings
-    double odom_vertex_dist_ = 1.0;
-    double laser_vertex_dist_ = 0.5;
+    double laser_vertex_dist_ = 0.25;
+    double laser_vertex_dtheta_ = 3.141/2.0;
     double icp_translation_convergence_threshold_ = 0.005;
-    double icp_rotation_convergence_threshold_ = 0.005;
+    double icp_rotation_convergence_threshold_ = 0.001;
     int icp_max_iterations_ = 20;
-    double icp_max_distance_ = 0.1;
+    int icp_use_nth_point_ = 5;
+    double icp_max_distance_ = 1.5;
+    double loop_closure_distance_threshold_ = 0.125;
 
     // helper functions
     bool iterativeClosestPoint(const g2o::RawLaser& scan_p, const g2o::RawLaser& scan_q,
       double& delta_x, double& delta_y, double& delta_theta);
     void laserScanToPoint(double robot_x, double robot_y, double robot_theta, double laser_range, double laser_angle, double& laser_x, double& laser_y);
+    bool closeLoop(int vertex_id);
 };
 
 } /* namespace tug_g2o_based_mapping */

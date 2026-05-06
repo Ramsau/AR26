@@ -116,7 +116,6 @@ namespace tug_g2o_based_mapping {
     // Init
     init(0.0, 0.0, 0.0);
 
-    // TODO
     // find appropriate parameters
     double x_noise = 1;
     double y_noise = 1;
@@ -130,9 +129,9 @@ namespace tug_g2o_based_mapping {
     odom_noise_(2, 2) = 1 / (rot_noise * rot_noise);
 
     laser_noise_.fill(0.0);
-    laser_noise_(0, 0) = 1;
-    laser_noise_(1, 1) = 1;
-    laser_noise_(2, 2) = 1;
+    laser_noise_(0, 0) = 0.8;
+    laser_noise_(1, 1) = 0.8;
+    laser_noise_(2, 2) = 5.0;
 
     landmark_noise_.fill(0.0);
     landmark_noise_(0, 0) = 1 / (landmark_x_noise * landmark_x_noise);
@@ -173,25 +172,20 @@ namespace tug_g2o_based_mapping {
     // local variable oodom contains the current odometry position estimation (ROS Odometry Messasge)
 
     // global variable x_ holds your position (Eigen vector of size 3 [x,y,theta])
-    double delta_x = odom->pose.pose.position.x - last_odometry_.pose.pose.position.x;
-    double delta_y = odom->pose.pose.position.y - last_odometry_.pose.pose.position.y;
+    double delta_x_odom = odom->pose.pose.position.x - last_odometry_.pose.pose.position.x;
+    double delta_y_odom = odom->pose.pose.position.y - last_odometry_.pose.pose.position.y;
     double delta_theta = yawFromQuaternion(odom->pose.pose.orientation) - yawFromQuaternion(last_odometry_.pose.pose.orientation);
-    x_(0, 0) += delta_x;
-    x_(1, 0) += delta_y;
+
+    double last_yaw = yawFromQuaternion(last_odometry_.pose.pose.orientation);
+    double delta_x_robot = cos(last_yaw) * delta_x_odom + sin(last_yaw) * delta_y_odom;
+    double delta_y_robot = - sin(last_yaw) * delta_x_odom + cos(last_yaw) * delta_y_odom;
+
+    // take into account drifting orientation
+    double delta_x_est = cos(x_(2)) * delta_x_robot - sin(x_(2)) * delta_y_robot;
+    double delta_y_est = sin(x_(2)) * delta_x_robot + cos(x_(2)) * delta_y_robot;
+    x_(0, 0) += delta_x_est;
+    x_(1, 0) += delta_y_est;
     x_(2, 0) += delta_theta;
-
-    static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-    static int last_vertex_id = -1;
-    if ((last_vertex_pos - x_).norm() > odom_vertex_dist_) {
-      last_vertex_pos = x_;
-      // last_id_++;
-      // addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
-
-      if (last_vertex_id != -1) {
-        // addOdomEdge(last_vertex_id, last_id_);
-      }
-      last_vertex_id = last_id_;
-    }
 
     // Keep This - reports your update
     last_odometry_ = *odom;
@@ -214,7 +208,6 @@ namespace tug_g2o_based_mapping {
       return;
     }
 
-    // TODO
     // 1. Enter your laser scan update here
 
     auto last_vertex = dynamic_cast<g2o::VertexSE2*>(graph_.vertex(last_id_));
@@ -228,7 +221,11 @@ namespace tug_g2o_based_mapping {
       last_vertex->estimate()[1],
       last_vertex->estimate()[2]
     };
-    if ((x_ - last_vertex_pose).norm() > laser_vertex_dist_) {
+    Eigen::Vector2<double> dist = {
+      x_(0) - last_vertex_pose(0),
+      x_(1) - last_vertex_pose(1)
+    };
+    if (dist.norm() > laser_vertex_dist_ || abs(x_(2) - last_vertex_pose(2)) > laser_vertex_dtheta_) {
       // create new vertex and connect
       Eigen::Vector3<double> last_vertex_pose{
         last_vertex->estimate()[0],
@@ -238,27 +235,38 @@ namespace tug_g2o_based_mapping {
       double delta_x = x_(0) - last_vertex_pose(0);
       double delta_y = x_(1) - last_vertex_pose(1);
       double delta_theta = x_(2) - last_vertex_pose(2);
-      // RCLCPP_INFO_STREAM(get_logger(), "initial delta_x: " << delta_x << " delta_y: " << delta_y << " delta_theta: " << delta_theta);
+
       g2o::RawLaser* last_laser = dynamic_cast<g2o::RawLaser*>(graph_.vertex(last_id_)->userData());
       std::shared_ptr<g2o::RawLaser> current_laser = std::make_shared<g2o::RawLaser>();
       current_laser->setLaserParams(*laser_params_);
       current_laser->setRanges(std::vector<double>(laser->ranges.begin(), laser->ranges.end()));
+
       double delta_x_robot = cos(last_vertex_pose(2)) * delta_x + sin(last_vertex_pose(2)) * delta_y;
       double delta_y_robot = - sin(last_vertex_pose(2)) * delta_x + cos(last_vertex_pose(2)) * delta_y;
       double delta_theta_robot = delta_theta;
-      RCLCPP_INFO_STREAM(get_logger(), "dxr:" << delta_x_robot << " dyr:" << delta_y_robot << " dtr:" << delta_theta_robot);
       if (iterativeClosestPoint(*current_laser, *last_laser, delta_x_robot, delta_y_robot, delta_theta_robot)) {
 
-        addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_ + 1, false);
+        delta_x = cos(last_vertex_pose(2)) * delta_x_robot - sin(last_vertex_pose(2)) * delta_y_robot;
+        delta_y = sin(last_vertex_pose(2)) * delta_x_robot + cos(last_vertex_pose(2)) * delta_y_robot;
+        delta_theta = delta_theta_robot;
+        addLaserVertex(
+          last_vertex_pose(0) + delta_x,
+          last_vertex_pose(1) + delta_y,
+          last_vertex_pose(2) + delta_theta,
+        *laser, last_id_ + 1, false);
         addLaserEdge(last_id_, last_id_ + 1,
           delta_x_robot,
           delta_y_robot,
         delta_theta_robot,
         laser_noise_);
+
+
         last_id_++;
 
-        optimizeGraph();
-        setRobotToVertex(last_id_);
+        if (closeLoop(last_id_)) {
+          optimizeGraph();
+          setRobotToVertex(last_id_);
+        }
 
       } else {
         RCLCPP_WARN_STREAM(get_logger(), "ICP failed");
@@ -276,15 +284,69 @@ namespace tug_g2o_based_mapping {
     visualizeLaserScans();
   }
 
+
+  // -----------------------------------------------------------------------------
+  bool G2OBasedMapping::closeLoop(int id) {
+    std::vector<double> vertex_pos;
+    g2o::OptimizableGraph::Vertex * vertex = graph_.vertex(id);
+    vertex->getEstimateData(vertex_pos);
+
+    for (auto other_vertex_pair: graph_.vertices()) {
+      int other_vertex_id = other_vertex_pair.first;
+      // check identity
+      if (other_vertex_id == id) {
+        continue;
+      }
+
+      // check distance
+      g2o::OptimizableGraph::Vertex * other_vertex = graph_.vertex(other_vertex_id);
+      std::vector<double> other_vertex_pos;
+      other_vertex->getEstimateData(other_vertex_pos);
+      double dx = vertex_pos[0] - other_vertex_pos[0];
+      double dy = vertex_pos[1] - other_vertex_pos[1];
+      double distance = sqrt(dx * dx + dy * dy);
+      if (distance > loop_closure_distance_threshold_) {
+        continue;
+      }
+
+      // check neighbor
+      for (auto edge: vertex->edges()) {
+        if (edge->vertex(0)->id() == other_vertex_id || edge->vertex(1)->id() == other_vertex_id) {
+          continue;
+        }
+      }
+
+      g2o::RawLaser* vertex_laser = dynamic_cast<g2o::RawLaser*>(vertex->userData());
+      g2o::RawLaser* other_vertex_laser = dynamic_cast<g2o::RawLaser*>(other_vertex->userData());
+      double delta_x = vertex_pos[0] - other_vertex_pos[0];
+      double delta_y = vertex_pos[1] - other_vertex_pos[1];
+      double delta_theta = vertex_pos[2] - other_vertex_pos[2];
+
+
+      double delta_x_robot = cos(other_vertex_pos[2]) * delta_x + sin(other_vertex_pos[2]) * delta_y;
+      double delta_y_robot = - sin(other_vertex_pos[2]) * delta_x + cos(other_vertex_pos[2]) * delta_y;
+      double delta_theta_robot = delta_theta;
+      if (iterativeClosestPoint(*vertex_laser, *other_vertex_laser, delta_x_robot, delta_y_robot, delta_theta_robot)) {
+        addLaserEdge(other_vertex_id, id, delta_x_robot, delta_y_robot, delta_theta_robot, laser_noise_);
+        return true;
+      }
+    }
+    return false;
+  }
+
+
   // -----------------------------------------------------------------------------
   bool G2OBasedMapping::iterativeClosestPoint(const g2o::RawLaser &scan_p, const g2o::RawLaser &scan_q,
     double& delta_x, double& delta_y, double& delta_theta) {
     typedef Eigen::Vector2<double> Point;
     std::vector<Point> points_q;
 
-    // precompute points of scan a, also get centroid
+    // precompute points of scan q
     for (int q_range_id = 0; q_range_id < scan_q.ranges().size(); q_range_id++) {
       if (std::isnan(scan_q.ranges()[q_range_id]) || std::isinf(scan_q.ranges()[q_range_id])) {
+        continue;
+      }
+      if (q_range_id % icp_use_nth_point_ != 0) {
         continue;
       }
       double range = scan_q.ranges()[q_range_id];
@@ -301,13 +363,16 @@ namespace tug_g2o_based_mapping {
       std::map<int, int> closest_points{};
       double error = 0;
 
-      // get closest point in a for each point in b
+      // get closest point in q for each point in p
       std::vector<Point> points_p;
       Point centroid_p = {0, 0};
       Point centroid_q = {0, 0};
       int p_id = 0;
       for (int p_range_id = 0; p_range_id < scan_p.ranges().size(); p_range_id++) {
         if (std::isnan(scan_p.ranges()[p_range_id]) || std::isinf(scan_p.ranges()[p_range_id])) {
+          continue;
+        }
+        if (p_range_id % icp_use_nth_point_ != 0) {
           continue;
         }
         double range = scan_p.ranges()[p_range_id];
@@ -370,7 +435,7 @@ namespace tug_g2o_based_mapping {
       delta_y += dd_y;
       delta_theta += dd_theta;
       if (sqrt(dd_x * dd_x + dd_y * dd_y) < icp_translation_convergence_threshold_ && dd_theta < icp_rotation_convergence_threshold_) {
-        RCLCPP_INFO_STREAM(get_logger(), "final dx:" << delta_x << " dy:" << delta_y << " dtheta:" << delta_theta);
+        RCLCPP_DEBUG_STREAM(get_logger(), "final dx:" << delta_x << " dy:" << delta_y << " dtheta:" << delta_theta);
         return true;
       }
       RCLCPP_DEBUG_STREAM(get_logger(), "delta_x: " << delta_x << " delta_y: " << delta_y << " delta_theta: " << delta_theta);
