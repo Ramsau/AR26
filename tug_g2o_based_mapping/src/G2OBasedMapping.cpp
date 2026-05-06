@@ -184,11 +184,11 @@ namespace tug_g2o_based_mapping {
     static int last_vertex_id = -1;
     if ((last_vertex_pos - x_).norm() > odom_vertex_dist_) {
       last_vertex_pos = x_;
-      last_id_++;
-      addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
+      // last_id_++;
+      // addOdomVertex(x_(0, 0), x_(1, 0), x_(2, 0), last_id_, false);
 
       if (last_vertex_id != -1) {
-        addOdomEdge(last_vertex_id, last_id_);
+        // addOdomEdge(last_vertex_id, last_id_);
       }
       last_vertex_id = last_id_;
     }
@@ -217,27 +217,51 @@ namespace tug_g2o_based_mapping {
     // TODO
     // 1. Enter your laser scan update here
 
-    static Eigen::Vector3<double> last_vertex_pos = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-    static int last_vertex_id = -1;
-    static LaserScan::ConstSharedPtr last_laser = nullptr;
-    if ((x_ - last_vertex_pos).norm() > laser_vertex_dist_) {
-      last_vertex_pos = x_;
-      last_id_++;
-      addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_, false);
-      if (last_vertex_id != -1) {
-        double delta_x = x_(0) - last_vertex_pos(0);
-        double delta_y = x_(1) - last_vertex_pos(1);
-        double delta_theta = x_(2) - last_vertex_pos(2);
-        if (iterativeClosestPoint(laser, last_laser, delta_x, delta_y, delta_theta)) {
-          last_vertex_id = last_id_;
-          last_laser = laser;
-        } else {
-          RCLCPP_WARN_STREAM(get_logger(), "ICP failed");
-        }
-      }
-      else {
-        last_vertex_id = last_id_;
-        last_laser = laser;
+    auto last_vertex = dynamic_cast<g2o::VertexSE2*>(graph_.vertex(last_id_));
+    if (!last_vertex) {
+      RCLCPP_ERROR_STREAM(get_logger(), "last vertex is not a vertexSE2");
+      return;
+    }
+
+    Eigen::Vector3<double> last_vertex_pose{
+      last_vertex->estimate()[0],
+      last_vertex->estimate()[1],
+      last_vertex->estimate()[2]
+    };
+    if ((x_ - last_vertex_pose).norm() > laser_vertex_dist_) {
+      // create new vertex and connect
+      Eigen::Vector3<double> last_vertex_pose{
+        last_vertex->estimate()[0],
+        last_vertex->estimate()[1],
+        last_vertex->estimate()[2]
+      };
+      double delta_x = x_(0) - last_vertex_pose(0);
+      double delta_y = x_(1) - last_vertex_pose(1);
+      double delta_theta = x_(2) - last_vertex_pose(2);
+      // RCLCPP_INFO_STREAM(get_logger(), "initial delta_x: " << delta_x << " delta_y: " << delta_y << " delta_theta: " << delta_theta);
+      g2o::RawLaser* last_laser = dynamic_cast<g2o::RawLaser*>(graph_.vertex(last_id_)->userData());
+      std::shared_ptr<g2o::RawLaser> current_laser = std::make_shared<g2o::RawLaser>();
+      current_laser->setLaserParams(*laser_params_);
+      current_laser->setRanges(std::vector<double>(laser->ranges.begin(), laser->ranges.end()));
+      double delta_x_robot = cos(last_vertex_pose(2)) * delta_x + sin(last_vertex_pose(2)) * delta_y;
+      double delta_y_robot = - sin(last_vertex_pose(2)) * delta_x + cos(last_vertex_pose(2)) * delta_y;
+      double delta_theta_robot = delta_theta;
+      RCLCPP_INFO_STREAM(get_logger(), "dxr:" << delta_x_robot << " dyr:" << delta_y_robot << " dtr:" << delta_theta_robot);
+      if (iterativeClosestPoint(*current_laser, *last_laser, delta_x_robot, delta_y_robot, delta_theta_robot)) {
+
+        addLaserVertex(x_(0), x_(1), x_(2), *laser, last_id_ + 1, false);
+        addLaserEdge(last_id_, last_id_ + 1,
+          delta_x_robot,
+          delta_y_robot,
+        delta_theta_robot,
+        laser_noise_);
+        last_id_++;
+
+        optimizeGraph();
+        setRobotToVertex(last_id_);
+
+      } else {
+        RCLCPP_WARN_STREAM(get_logger(), "ICP failed");
       }
     }
     // 2. Build up the pose graph by adding odometry and laser edges
@@ -253,32 +277,23 @@ namespace tug_g2o_based_mapping {
   }
 
   // -----------------------------------------------------------------------------
-  bool G2OBasedMapping::iterativeClosestPoint(const LaserScan::ConstSharedPtr &scan_p, const LaserScan::ConstSharedPtr &scan_q,
+  bool G2OBasedMapping::iterativeClosestPoint(const g2o::RawLaser &scan_p, const g2o::RawLaser &scan_q,
     double& delta_x, double& delta_y, double& delta_theta) {
     typedef Eigen::Vector2<double> Point;
     std::vector<Point> points_q;
-    std::vector<Point> points_q_centered;
 
     // precompute points of scan a, also get centroid
-    Point centroid_q = {0, 0};
-    for (int q_range_id = 0; q_range_id < scan_q->ranges.size(); q_range_id++) {
-      if (std::isnan(scan_q->ranges[q_range_id]) || std::isinf(scan_q->ranges[q_range_id])) {
+    for (int q_range_id = 0; q_range_id < scan_q.ranges().size(); q_range_id++) {
+      if (std::isnan(scan_q.ranges()[q_range_id]) || std::isinf(scan_q.ranges()[q_range_id])) {
         continue;
       }
-      double range = scan_q->ranges[q_range_id];
-      double angle = scan_q->angle_min + scan_q->angle_increment * q_range_id;
+      double range = scan_q.ranges()[q_range_id];
+      double angle = scan_q.laserParams().firstBeamAngle + scan_q.laserParams().angularStep * q_range_id;
       double x, y;
       laserScanToPoint(0, 0, 0, range, angle, x, y);
       points_q.push_back({x, y});
-      centroid_q(0) += x;
-      centroid_q(1) += y;
     }
-    centroid_q(0) /= scan_q->ranges.size();
-    centroid_q(1) /= scan_q->ranges.size();
 
-    for (int q_id = 0; q_id < points_q.size(); q_id++) {
-      points_q_centered.push_back({points_q.at(q_id)(0) - centroid_q(0), points_q.at(q_id)(1) - centroid_q(1)});
-    }
 
     // iterate until convergence
     int iterations = 1;
@@ -288,15 +303,15 @@ namespace tug_g2o_based_mapping {
 
       // get closest point in a for each point in b
       std::vector<Point> points_p;
-      std::vector<Point> points_p_centered;
       Point centroid_p = {0, 0};
+      Point centroid_q = {0, 0};
       int p_id = 0;
-      for (int p_range_id = 0; p_range_id < scan_p->ranges.size(); p_range_id++) {
-        if (std::isnan(scan_p->ranges[p_range_id]) || std::isinf(scan_p->ranges[p_range_id])) {
+      for (int p_range_id = 0; p_range_id < scan_p.ranges().size(); p_range_id++) {
+        if (std::isnan(scan_p.ranges()[p_range_id]) || std::isinf(scan_p.ranges()[p_range_id])) {
           continue;
         }
-        double range = scan_p->ranges[p_range_id];
-        double angle = scan_p->angle_min + scan_p->angle_increment * p_range_id;
+        double range = scan_p.ranges()[p_range_id];
+        double angle = scan_p.laserParams().firstBeamAngle + scan_p.laserParams().angularStep * p_range_id;
         double x, y;
         laserScanToPoint(delta_x, delta_y, delta_theta, range, angle, x, y);
         int closest_point_id = -1;
@@ -308,46 +323,59 @@ namespace tug_g2o_based_mapping {
             closest_point_id = q_id;
           }
         }
-        closest_points[p_id] = closest_point_id;
-        error += closest_distance * closest_distance;
-        centroid_p(0) += x;
-        centroid_p(1) += y;
-        points_p.push_back({x, y});
-        p_id++;
+        if (closest_distance < icp_max_distance_) {
+          closest_points[p_id] = closest_point_id;
+          error += closest_distance * closest_distance;
+
+          centroid_p += Point(x, y);
+          centroid_q += points_q.at(closest_point_id);
+
+          points_p.push_back({x, y});
+          p_id++;
+        } else {
+          RCLCPP_DEBUG_STREAM(get_logger(), "point " << p_range_id << " is too far away");
+        }
       }
-      centroid_p(0) /= scan_p->ranges.size();
-      centroid_p(1) /= scan_p->ranges.size();
-      error /= scan_p->ranges.size();
+      centroid_p /= points_p.size();
+      centroid_q /= points_q.size();
+      error /= points_p.size();
 
-
+      // calculate centered p and W
       Eigen::Matrix2<double> W = Eigen::Matrix2<double>::Zero();
       for (int p_id = 0; p_id < points_p.size(); p_id++) {
-        // TODO fix this
-        points_p_centered.push_back({points_p.at(p_id)(0) - centroid_p(0), points_p.at(p_id)(1) - centroid_p(1)});
-        W += points_p_centered.at(p_id) * points_q_centered.at(closest_points.at(p_id)).transpose();
+        Point p_centered = points_p.at(p_id) - centroid_p;
+        Point q_centered = points_q.at(closest_points.at(p_id)) - centroid_q;
+        W += p_centered * q_centered.transpose();
       }
       Eigen::Matrix2<double> U, V;
       Eigen::JacobiSVD<Eigen::Matrix2<double>> svd(W, Eigen::ComputeFullU | Eigen::ComputeFullV);
       U = svd.matrixU();
       V = svd.matrixV();
-      Eigen::Matrix2<double> R = U * V.transpose();
+      Eigen::Matrix2<double> R = V * U.transpose();
+      if (R.determinant() < 0) {
+        V.col(1) *= -1;
+        R = V * U.transpose();
+      }
       // Eigen::Vector2<double> delta_p = R * (points_p.at(0) - points_q.at(closest_points.at(0)));
       RCLCPP_DEBUG_STREAM(get_logger(), "R:\n" << R);
       Eigen::Vector2<double> T = centroid_q - R * centroid_p;
       RCLCPP_DEBUG_STREAM(get_logger(), "T:\n" << T);
       RCLCPP_DEBUG_STREAM(get_logger(), "error: " << error);
 
+      double dd_x = T(0);
+      double dd_y = T(1);
+      double dd_theta = atan2(R(1, 0), R(0, 0));
+
+      delta_x += dd_x;
+      delta_y += dd_y;
+      delta_theta += dd_theta;
+      if (sqrt(dd_x * dd_x + dd_y * dd_y) < icp_translation_convergence_threshold_ && dd_theta < icp_rotation_convergence_threshold_) {
+        RCLCPP_INFO_STREAM(get_logger(), "final dx:" << delta_x << " dy:" << delta_y << " dtheta:" << delta_theta);
+        return true;
+      }
+      RCLCPP_DEBUG_STREAM(get_logger(), "delta_x: " << delta_x << " delta_y: " << delta_y << " delta_theta: " << delta_theta);
       if (iterations++ > icp_max_iterations_) {
         return false;
-      }
-
-      if (error > icp_error_threshold_) {
-        delta_x += T(0);
-        delta_y += T(1);
-        delta_theta -= atan2(R(1, 0), R(0, 0));
-      } else {
-        RCLCPP_DEBUG_STREAM(get_logger(), "final dx:" << delta_x << " dy:" << delta_y << " dtheta:" << delta_theta);
-        return true;
       }
     }
   }
