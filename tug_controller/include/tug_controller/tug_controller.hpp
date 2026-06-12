@@ -2,6 +2,7 @@
 #define _TUG_CONTROLLER__TUG_CONTROLLER_HPP_
 
 #include "nav2_core/controller.hpp"
+#include <nav2_costmap_2d/footprint_collision_checker.hpp>
 
 namespace tug_controller
 {
@@ -26,19 +27,30 @@ class TugController : public nav2_core::Controller
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS> cost_map_;
     Path path_;
     PoseStamped front_center_pose_;
+    PoseStamped front_left_pose_ ;
+    PoseStamped front_right_pose_;
+    PoseStamped base_link_pose_;
     double wheelbase_ = 0.0;
-    double speed_limit_ = 0.1;
+    std::unique_ptr<nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D*>> costmap_cheker_;
 
   // Settings -----------------------------------------------------------------
   private:
     std::string front_left_frame_ = "front_left_wheel";
     std::string front_right_frame_ = "front_right_wheel";
     std::string base_link_frame_ = "base_link";
-    double path_averaging_dist = 0.2;
-    double k_cte_ = 0.0;
+    double path_averaging_dist = 0.1;
+    double k_cte_ = 0.5;
+    double speed_limit_ = 1.0;
     double max_acceleration_ = 0.3;
+    double max_steering_angle_ = M_PI_2;
+    double movement_cutoff_distance_ = 0.1;
+    double k_speed_distance_ = 1.0;
     double k_speed_p_ = 1.0;
-    double k_speed_i_ = 0.0;
+    double k_speed_i_ = 0.01;
+    double collision_lookahead_time_ = 0.5;
+    double collision_costmap_value = 200;
+    double collision_speed_step_factor = 0.5;
+    double collision_angular_rate_step_factor = 0.9;
 
   // Methods -------------------------------------------------------------------
   public:
@@ -75,6 +87,7 @@ class TugController : public nav2_core::Controller
     double getPathAngle(Path path, int path_idx, double averaging_dist);
     double getCrossTrackError(Path path, int path_idx, PoseStamped pose, double path_angle);
     double normalizeAngle(double angle);
+    double getPoseCost(PoseStamped pose);
 };
 
 } /* namespace tug_controller */
