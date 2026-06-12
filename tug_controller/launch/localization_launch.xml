@@ -5,5 +5,6 @@
   <include file="$(find-pkg-share nav2_bringup)/launch/localization_launch.py">
     <arg name="map" value="$(find-pkg-share tug_husky)/map/maze.yaml" />
     <arg name="params_file" value="$(find-pkg-share tug_controller)/config/localization.yaml" />
+    <arg name="use_sim_time" value="True"/>
   </include>
 </launch>

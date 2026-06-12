@@ -4,5 +4,6 @@
 <launch>
   <include file="$(find-pkg-share nav2_bringup)/launch/navigation_launch.py">
     <arg name="params_file" value="$(find-pkg-share tug_controller)/config/navigation.yaml" />
+    <arg name="use_sim_time" value="True"/>
   </include>
 </launch>
